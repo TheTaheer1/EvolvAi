@@ -7,6 +7,7 @@ from typing import Any, Type
 from pydantic import BaseModel, ValidationError
 
 from app.core.config import settings
+from app.llm.prompts import compact_schema_hint
 
 
 class GroqStructuredResult(BaseModel):
@@ -26,6 +27,7 @@ class GroqStructuredClient:
         system_prompt: str,
         user_prompt: str,
         schema_model: Type[BaseModel],
+        max_tokens: int | None = None,
     ) -> GroqStructuredResult:
         if not settings.GROQ_API_KEY:
             raise RuntimeError("missing_api_key")
@@ -40,12 +42,15 @@ class GroqStructuredClient:
             max_retries=settings.LLM_MAX_RETRIES,
         )
 
-        schema_hint = json.dumps(schema_model.model_json_schema(), indent=2)
+        schema_hint = compact_schema_hint(schema_model) if settings.LLM_COMPACT_PROMPTS else json.dumps(
+            schema_model.model_json_schema(),
+            separators=(",", ":"),
+        )
         full_user_prompt = (
             f"{user_prompt}\n\n"
             "Return only valid JSON matching the required schema. Do not include markdown, comments, prose, "
-            "hidden chain-of-thought, or surrounding text.\n"
-            f"Required JSON shape:\n{schema_hint}"
+            "hidden chain-of-thought, or surrounding text. Keep every string short.\n"
+            f"Required JSON example with all required keys:\n{schema_hint}"
         )
 
         started = perf_counter()
@@ -56,7 +61,7 @@ class GroqStructuredClient:
                 {"role": "user", "content": full_user_prompt},
             ],
             response_format={"type": "json_object"},
-            max_tokens=settings.GROQ_MAX_OUTPUT_TOKENS,
+            max_tokens=max_tokens or settings.GROQ_MAX_OUTPUT_TOKENS,
             temperature=settings.GROQ_TEMPERATURE,
         )
         latency_ms = int((perf_counter() - started) * 1000)

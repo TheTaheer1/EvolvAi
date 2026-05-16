@@ -1,9 +1,15 @@
-.DS_Store
+# Environment / secrets
 .env
 .env.*
 !.env.example
 apps/backend/.env
+apps/backend/.env.*
+!apps/backend/.env.example
 apps/frontend/.env.local
+apps/frontend/.env
+apps/frontend/.env.*
+
+# Python
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -11,14 +17,26 @@ __pycache__/
 .ruff_cache/
 .venv/
 venv/
+apps/backend/.venv/
+
+# Node / Next
 node_modules/
+apps/frontend/node_modules/
 .next/
+apps/frontend/.next/
 out/
 dist/
 build/
-*.log
-coverage/
+
+# Generated outputs
 apps/backend/generated_runs/
 generated_runs/
-.idea/
+
+# Logs
+*.log
+logs/
+
+# OS / Editor
+.DS_Store
 .vscode/
+.idea/

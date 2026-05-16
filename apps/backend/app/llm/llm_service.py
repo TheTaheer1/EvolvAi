@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from time import perf_counter
+from time import perf_counter, sleep
 from typing import Any, Type, TypeVar
 
 from pydantic import BaseModel, ValidationError
@@ -414,9 +414,10 @@ class LLMService:
         user_prompt: str,
         fallback_output: SchemaT,
     ) -> tuple[SchemaT, dict[str, Any]]:
-        prompt_hash = _prompt_hash(GLOBAL_SYSTEM_PROMPT, user_prompt)
-        metadata = self._base_metadata(workflow_id, agent_name, prompt_hash)
         provider = self.provider_name()
+        model = self._active_model(agent_name)
+        prompt_hash = _prompt_hash(GLOBAL_SYSTEM_PROMPT, user_prompt)
+        metadata = self._base_metadata(workflow_id, agent_name, prompt_hash, model=model)
         if provider not in {"openai", "groq"}:
             return self._fallback(fallback_output, metadata, "unsupported_provider_for_agent", "fallback_used")
         if not settings.USE_LIVE_AI_OUTPUTS:
@@ -441,13 +442,15 @@ class LLMService:
 
         started = perf_counter()
         try:
+            self._sleep_before_llm_call()
             result = self._structured_client(provider).generate_structured(
-                model=self._active_model(),
+                model=model,
                 system_prompt=GLOBAL_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
                 schema_model=schema_model,
+                max_tokens=self._max_output_tokens(provider),
             )
-            validated = schema_model.model_validate(result.output)
+            validated, repaired = self._validate_or_repair(schema_model, result.output, fallback_output)
             metadata.update(
                 {
                     "mode": "llm_enhanced",
@@ -456,16 +459,25 @@ class LLMService:
                     "fallback_used": False,
                     "structured_output_valid": True,
                     "latency_ms": result.latency_ms,
+                    "schema_repaired": repaired,
                     **result.usage,
                 }
             )
             return validated, metadata
-        except ValidationError as exc:
-            metadata["latency_ms"] = int((perf_counter() - started) * 1000)
-            return self._fallback(fallback_output, metadata, "schema_validation_error", "fallback_used", exc)
         except Exception as exc:  # noqa: BLE001
             metadata["latency_ms"] = int((perf_counter() - started) * 1000)
-            error_type = self.classify_error(exc)
+            error_type = self.classify_error(exc, provider=provider)
+            if provider == "groq" and error_type == "model_not_found" and model != settings.GROQ_MODEL:
+                return self._retry_with_default_groq_model(
+                    workflow_id=workflow_id,
+                    agent_name=agent_name,
+                    schema_model=schema_model,
+                    user_prompt=user_prompt,
+                    fallback_output=fallback_output,
+                    metadata=metadata,
+                    started=started,
+                    first_error=exc,
+                )
             if settings.LLM_FALLBACK_TO_DEMO:
                 return self._fallback(fallback_output, metadata, error_type, "fallback_used", exc)
             metadata.update(
@@ -485,15 +497,150 @@ class LLMService:
             return GroqStructuredClient()
         return OpenAIStructuredClient()
 
-    def _active_model(self) -> str:
+    def _retry_with_default_groq_model(
+        self,
+        *,
+        workflow_id: str | None,
+        agent_name: str,
+        schema_model: Type[SchemaT],
+        user_prompt: str,
+        fallback_output: SchemaT,
+        metadata: dict[str, Any],
+        started: float,
+        first_error: Exception,
+    ) -> tuple[SchemaT, dict[str, Any]]:
+        fallback_model = settings.GROQ_MODEL
+        metadata["model"] = fallback_model
+        try:
+            self._sleep_before_llm_call()
+            result = self._structured_client("groq").generate_structured(
+                model=fallback_model,
+                system_prompt=GLOBAL_SYSTEM_PROMPT,
+                user_prompt=user_prompt,
+                schema_model=schema_model,
+                max_tokens=self._max_output_tokens("groq"),
+            )
+            validated, repaired = self._validate_or_repair(schema_model, result.output, fallback_output)
+            metadata.update(
+                {
+                    "mode": "llm_enhanced",
+                    "output_mode": "llm_enhanced",
+                    "status": "success",
+                    "fallback_used": False,
+                    "structured_output_valid": True,
+                    "latency_ms": int((perf_counter() - started) * 1000),
+                    "model_fallback_used": True,
+                    "model_fallback_reason": "model_not_found",
+                    "schema_repaired": repaired,
+                    **result.usage,
+                }
+            )
+            return validated, metadata
+        except Exception as exc:  # noqa: BLE001
+            metadata["latency_ms"] = int((perf_counter() - started) * 1000)
+            error_type = self.classify_error(exc, provider="groq")
+            if settings.LLM_FALLBACK_TO_DEMO:
+                return self._fallback(fallback_output, metadata, error_type, "fallback_used", exc)
+            metadata.update(
+                {
+                    "mode": "llm_failed",
+                    "output_mode": "fallback_used",
+                    "status": "failed",
+                    "fallback_used": False,
+                    "structured_output_valid": False,
+                    "error_message": error_type,
+                    "previous_error_message": self.classify_error(first_error, provider="groq"),
+                }
+            )
+            raise RuntimeError(f"LLM generation failed: {error_type}") from exc
+
+    def _active_model(self, agent_name: str | None = None) -> str:
         provider = self.provider_name()
         if provider == "gemini":
             return settings.GEMINI_MODEL
         if provider == "groq":
-            return settings.GROQ_MODEL
+            return self._groq_model_for_agent(agent_name)
         if provider in {"xai", "grok"}:
             return settings.XAI_MODEL
         return settings.OPENAI_MODEL
+
+    def _groq_model_for_agent(self, agent_name: str | None = None) -> str:
+        fallback = settings.GROQ_MODEL
+        default = (settings.GROQ_MODEL_DEFAULT or fallback).strip() or fallback
+        key = (agent_name or "").replace("_agent", "").upper()
+        configured = getattr(settings, f"GROQ_MODEL_{key}", None)
+        return (configured or default or fallback).strip() or fallback
+
+    def _max_output_tokens(self, provider: str) -> int | None:
+        if provider == "groq":
+            return max(64, int(settings.GROQ_MAX_OUTPUT_TOKENS or 500))
+        if provider == "openai":
+            return max(64, int(settings.OPENAI_MAX_OUTPUT_TOKENS or 1500))
+        return None
+
+    def _sleep_before_llm_call(self) -> None:
+        if not settings.LLM_SEQUENTIAL_AGENT_CALLS:
+            return
+        delay_ms = int(settings.LLM_AGENT_DELAY_MS or 0)
+        if delay_ms <= 0:
+            return
+        try:
+            sleep(delay_ms / 1000)
+        except Exception:  # noqa: BLE001
+            return
+
+    def _validate_or_repair(
+        self,
+        schema_model: Type[SchemaT],
+        output: dict[str, Any],
+        fallback_output: SchemaT,
+    ) -> tuple[SchemaT, bool]:
+        try:
+            return schema_model.model_validate(output), False
+        except ValidationError as original_exc:
+            fallback_payload = fallback_output.model_dump()
+            candidate_payload = output if isinstance(output, dict) else {}
+            repaired = self._deep_merge(fallback_payload, candidate_payload)
+            try:
+                return schema_model.model_validate(repaired), True
+            except ValidationError as repair_exc:
+                conservative = self._merge_scalar_fields_only(fallback_payload, candidate_payload)
+                try:
+                    return schema_model.model_validate(conservative), True
+                except ValidationError:
+                    raise RuntimeError("schema_validation_error") from repair_exc or original_exc
+
+    def _deep_merge(self, fallback: Any, candidate: Any) -> Any:
+        if isinstance(fallback, dict) and isinstance(candidate, dict):
+            merged = dict(fallback)
+            for key, value in candidate.items():
+                if value is None or value == "" or value == [] or value == {}:
+                    continue
+                merged[key] = self._deep_merge(fallback.get(key), value)
+            return merged
+        if isinstance(fallback, list):
+            if isinstance(candidate, list) and candidate:
+                if fallback and isinstance(fallback[0], dict):
+                    template = fallback[0]
+                    repaired_items = [
+                        self._deep_merge(template, item) if isinstance(item, dict) else item
+                        for item in candidate
+                    ]
+                    return repaired_items
+                return candidate
+            return fallback
+        return candidate if candidate is not None and candidate != "" else fallback
+
+    def _merge_scalar_fields_only(self, fallback: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
+        merged = dict(fallback)
+        for key, value in candidate.items():
+            if value is None or value == "" or value == [] or value == {}:
+                continue
+            fallback_value = fallback.get(key)
+            if isinstance(fallback_value, (list, dict)):
+                continue
+            merged[key] = value
+        return merged
 
     def _provider_key_state(self, provider: str) -> str:
         if provider == "groq":
@@ -529,12 +676,19 @@ class LLMService:
             metadata["sanitized_error_detail"] = str(exc)[:500]
         return fallback_output, metadata
 
-    def _base_metadata(self, workflow_id: str | None, agent_name: str, prompt_hash: str) -> dict[str, Any]:
+    def _base_metadata(
+        self,
+        workflow_id: str | None,
+        agent_name: str,
+        prompt_hash: str,
+        *,
+        model: str | None = None,
+    ) -> dict[str, Any]:
         return {
             "workflow_id": workflow_id,
             "agent_name": agent_name,
             "provider": self.provider_name(),
-            "model": self._active_model(),
+            "model": model or self._active_model(agent_name),
             "mode": "deterministic",
             "output_mode": "deterministic",
             "prompt_hash": prompt_hash,
@@ -548,7 +702,7 @@ class LLMService:
             "error_message": None,
         }
 
-    def classify_error(self, exc: Exception) -> str:
+    def classify_error(self, exc: Exception, provider: str | None = None) -> str:
         text = str(exc).lower()
         name = exc.__class__.__name__.lower()
         if "missing_api_key" in text:
@@ -560,6 +714,8 @@ class LLMService:
         if "permission" in text or "forbidden" in text or "403" in text:
             return "permission_error"
         if "insufficient_quota" in text or "exceeded your current quota" in text or "quota" in text or "billing" in text:
+            if (provider or self.provider_name()) == "groq":
+                return "groq_quota_error"
             return "insufficient_quota"
         if "rate" in name or "rate limit" in text or "too many requests" in text or "429" in text:
             return "rate_limit_error"

@@ -7,7 +7,7 @@ import type { CompanyProfile } from "@/types/company-profile";
 import type { Decision } from "@/types/decision";
 import type { DemoScenario, DemoSpeed } from "@/types/demo-scenario";
 import type { ExplainabilityRecord } from "@/types/explainability";
-import type { ExternalEventIngestionRun, ExternalEventRaw, ExternalEventSource, LiveEventIngestResponse } from "@/types/external-event";
+import type { ExternalEventIngestionRun, ExternalEventRaw, ExternalEventSource, HackerNewsIngestRequest, LiveEventIngestResponse } from "@/types/external-event";
 import type { GeneratedArtifact } from "@/types/generated-artifact";
 import type { ImpactAnalysis } from "@/types/impact-analysis";
 import type { LLMConfig, LLMInvocation, LLMTestResponse } from "@/types/llm";
@@ -108,8 +108,16 @@ export const apiClient = {
         trigger_workflows: triggerWorkflows
       })
     ),
-  liveEventIngestionRuns: () => request<ExternalEventIngestionRun[]>(api.get("/live-events/ingestion-runs")),
-  liveEventRaw: () => request<ExternalEventRaw[]>(api.get("/live-events/raw")),
+  ingestHackerNewsEvents: (payload: HackerNewsIngestRequest) =>
+    request<LiveEventIngestResponse>(api.post("/live-events/ingest/hacker-news", payload)),
+  liveEventIngestionRuns: (source?: string) => {
+    const suffix = source ? `?source=${encodeURIComponent(source)}` : "";
+    return request<ExternalEventIngestionRun[]>(api.get(`/live-events/ingestion-runs${suffix}`));
+  },
+  liveEventRaw: (source?: string) => {
+    const suffix = source ? `?source=${encodeURIComponent(source)}` : "";
+    return request<ExternalEventRaw[]>(api.get(`/live-events/raw${suffix}`));
+  },
   analyzeRepository: (owner: string, repo: string, branch = "main") =>
     request<RepositoryAnalysis>(api.post("/repositories/analyze", { owner, repo, branch })),
   repositoryAnalyses: (limit = 25) => request<RepositoryAnalysis[]>(api.get(`/repositories/analyses?limit=${limit}`)),

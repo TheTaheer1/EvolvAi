@@ -2,6 +2,7 @@ from app.ingestion.dedupe import external_content_hash
 from app.ingestion.normalizer import normalize_github_repository_to_event
 from app.core.config import settings
 from app.llm.gemini_service import GeminiService
+from app.llm.prompts import build_execution_prompt, build_research_prompt
 from app.llm.llm_service import LLMService
 from app.llm.groq_client import GroqStructuredResult
 from app.llm.schemas import ExecutionLLMOutput, ResearchLLMOutput, StrategyAgentLLMOutput, WatcherLLMOutput
@@ -373,6 +374,8 @@ def test_groq_generic_structured_strategy_success(monkeypatch) -> None:
     monkeypatch.setattr(settings, "LLM_PROVIDER", "groq")
     monkeypatch.setattr(settings, "USE_LIVE_AI_OUTPUTS", True)
     monkeypatch.setattr(settings, "GROQ_API_KEY", "gsk-test-key")
+    monkeypatch.setattr(settings, "LLM_AGENT_DELAY_MS", 0)
+    monkeypatch.setattr(settings, "GROQ_MODEL_STRATEGY", "llama-3.1-8b-instant")
 
     def success(self, **kwargs):
         return GroqStructuredResult(
@@ -420,8 +423,109 @@ def test_groq_generic_structured_strategy_success(monkeypatch) -> None:
     )
     assert output.title == "Add AI meeting insights"
     assert metadata["provider"] == "groq"
+    assert metadata["model"] == "llama-3.1-8b-instant"
     assert metadata["status"] == "success"
     assert metadata["structured_output_valid"] is True
+
+
+def test_compact_prompt_truncates_large_context(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "LLM_COMPACT_PROMPTS", True)
+    monkeypatch.setattr(settings, "LLM_MAX_PROMPT_CHARS", 2500)
+    monkeypatch.setattr(settings, "LLM_MAX_EVIDENCE_ITEMS", 3)
+
+    evidence = [
+        {
+            "source": "controlled_demo",
+            "title": f"Evidence {index}",
+            "summary": "Large context " * 200,
+            "relevance": "high",
+        }
+        for index in range(8)
+    ]
+    prompt = build_research_prompt(
+        {"name": "AcmeFlow", "description": "Company description " * 200},
+        {"title": "Market event", "summary": "Event summary " * 200, "raw_payload": {"huge": "x" * 5000}},
+        evidence,
+    )
+
+    assert len(prompt) <= 2500
+    assert "Evidence 0" in prompt
+    assert "Evidence 2" in prompt
+    assert "Evidence 3" not in prompt
+
+
+def test_execution_prompt_uses_artifact_preview_in_compact_mode(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "LLM_COMPACT_PROMPTS", True)
+    monkeypatch.setattr(settings, "LLM_MAX_ARTIFACT_PREVIEW_CHARS", 80)
+
+    prompt = build_execution_prompt(
+        {"name": "AcmeFlow"},
+        {"title": "Market event"},
+        {"title": "Decision"},
+        {"final_priority": "high"},
+        {"objective": "Plan"},
+        [
+            {
+                "file_path": "demo/generated/example.md",
+                "artifact_type": "documentation",
+                "title": "Example",
+                "content": "A" * 5000,
+            }
+        ],
+    )
+
+    assert "content_preview" in prompt
+    assert "A" * 200 not in prompt
+
+
+def test_groq_per_agent_model_selection(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "groq")
+    monkeypatch.setattr(settings, "GROQ_MODEL", "llama-3.3-70b-versatile")
+    monkeypatch.setattr(settings, "GROQ_MODEL_DEFAULT", "llama-3.1-8b-instant")
+    monkeypatch.setattr(settings, "GROQ_MODEL_PLANNER", "llama-3.1-8b-instant")
+
+    assert LLMService()._active_model("planner_agent") == "llama-3.1-8b-instant"
+
+
+def test_groq_quota_error_falls_back_for_current_agent(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "groq")
+    monkeypatch.setattr(settings, "USE_LIVE_AI_OUTPUTS", True)
+    monkeypatch.setattr(settings, "LLM_FALLBACK_TO_DEMO", True)
+    monkeypatch.setattr(settings, "GROQ_API_KEY", "gsk-test-key")
+    monkeypatch.setattr(settings, "LLM_AGENT_DELAY_MS", 0)
+    monkeypatch.setattr(settings, "GROQ_MODEL_STRATEGY", "llama-3.1-8b-instant")
+
+    def quota_error(self, **kwargs):
+        raise RuntimeError("insufficient_quota: daily token quota exceeded")
+
+    monkeypatch.setattr("app.llm.groq_client.GroqStructuredClient.generate_structured", quota_error)
+    fallback = StrategyAgentLLMOutput(
+        title="Fallback strategy",
+        summary="Fallback summary",
+        business_impact=0.5,
+        technical_complexity=0.5,
+        urgency=0.5,
+        confidence_score=0.5,
+        risk_score=0.5,
+        recommended_action="Fallback action",
+        why_now="Fallback now",
+        why_relevant="Fallback relevant",
+        expected_benefit="Fallback benefit",
+    )
+
+    output, metadata = LLMService().generate_strategy_output(
+        workflow_id="demo",
+        company={"name": "AcmeFlow"},
+        market_event={"title": "Market event"},
+        research={"research_summary": "Research"},
+        fallback_output=fallback,
+    )
+
+    assert output.title == "Fallback strategy"
+    assert metadata["agent_name"] == "strategy_agent"
+    assert metadata["model"] == "llama-3.1-8b-instant"
+    assert metadata["status"] == "fallback_used"
+    assert metadata["error_message"] == "groq_quota_error"
 
 
 def _agent_state() -> dict:

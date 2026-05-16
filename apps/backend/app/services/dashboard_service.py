@@ -64,6 +64,8 @@ class DashboardService:
                 "github_configured": bool(settings.GITHUB_TOKEN),
                 "live_external_events_enabled": settings.USE_LIVE_EXTERNAL_EVENTS,
                 "github_ingestion_enabled": settings.GITHUB_INGESTION_ENABLED,
+                "hn_ingestion_enabled": settings.HN_INGESTION_ENABLED,
+                "hn_api_key_required": False,
                 "tracing_enabled": settings.TRACING_ENABLED,
             },
         }
@@ -150,5 +152,7 @@ class DashboardService:
                 "openai_configured": bool(settings.OPENAI_API_KEY),
                 "github_configured": bool(settings.GITHUB_TOKEN),
                 "github_ingestion_enabled": settings.GITHUB_INGESTION_ENABLED,
+                "hn_ingestion_enabled": settings.HN_INGESTION_ENABLED,
+                "hn_api_key_required": False,
             },
         }

@@ -54,3 +54,11 @@ export interface LiveEventIngestResponse {
   warnings: string[];
   workflows_triggered: string[];
 }
+
+export interface HackerNewsIngestRequest {
+  feed: "top" | "new" | "best" | "show" | "ask" | "jobs";
+  max_results: number;
+  keywords?: string[] | null;
+  min_score?: number | null;
+  trigger_workflows?: boolean;
+}

@@ -58,6 +58,14 @@ class LiveEventIngestRequest(BaseModel):
     trigger_workflows: bool = False
 
 
+class HackerNewsIngestRequest(BaseModel):
+    feed: str = "top"
+    max_results: int = Field(default=20, ge=1, le=50)
+    keywords: list[str] | None = None
+    min_score: int | None = Field(default=None, ge=0)
+    trigger_workflows: bool = False
+
+
 class LiveEventIngestResponse(BaseModel):
     run_id: UUID
     source: str = "github"

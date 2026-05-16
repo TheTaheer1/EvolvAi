@@ -31,11 +31,19 @@ class Settings(BaseSettings):
 
     GROQ_API_KEY: str | None = None
     GROQ_MODEL: str = "llama-3.3-70b-versatile"
+    GROQ_MODEL_DEFAULT: str = "llama-3.1-8b-instant"
+    GROQ_MODEL_WATCHER: str = "llama-3.1-8b-instant"
+    GROQ_MODEL_RESEARCH: str = "llama-3.1-8b-instant"
+    GROQ_MODEL_STRATEGY: str = "llama-3.1-8b-instant"
+    GROQ_MODEL_PLANNER: str = "llama-3.1-8b-instant"
+    GROQ_MODEL_EXECUTION: str = "llama-3.1-8b-instant"
+    GROQ_MODEL_VERIFICATION: str = "llama-3.1-8b-instant"
+    GROQ_MODEL_PR: str = "llama-3.1-8b-instant"
     GROQ_API_BASE_URL: str = "https://api.groq.com/openai/v1"
     GROQ_TIMEOUT_SECONDS: int = 30
     GROQ_MAX_RETRIES: int = 2
     GROQ_TEMPERATURE: float = 0.2
-    GROQ_MAX_OUTPUT_TOKENS: int = 1800
+    GROQ_MAX_OUTPUT_TOKENS: int = 500
 
     GEMINI_API_KEY: str | None = None
     GEMINI_MODEL: str = "gemini-2.0-flash"
@@ -68,6 +76,20 @@ class Settings(BaseSettings):
     GITHUB_PR_MAX_FILES: int = 10
     GITHUB_PR_REQUIRE_VERIFICATION_PASS: bool = True
     GITHUB_PR_ALLOWED_ARTIFACT_TYPES: str = "documentation,component,schema,config,plan,report"
+
+    HN_INGESTION_ENABLED: bool = True
+    HN_API_BASE_URL: str = "https://hacker-news.firebaseio.com/v0"
+    HN_DEFAULT_FEED: str = "top"
+    HN_MAX_STORIES: int = 20
+    HN_FETCH_DETAIL_CONCURRENCY: int = 5
+    HN_REQUEST_TIMEOUT_SECONDS: int = 15
+    HN_MAX_RETRIES: int = 2
+    HN_MIN_SCORE: int = 20
+    HN_MIN_IMPORTANCE_SCORE: float = 0.45
+    HN_KEYWORDS: str = (
+        "ai,artificial intelligence,llm,agent,saas,startup,workflow,automation,productivity,"
+        "developer tools,compliance,security,rag,copilot"
+    )
 
     REPO_ANALYSIS_ENABLED: bool = True
     REPO_ANALYSIS_MAX_FILES: int = 80
@@ -105,6 +127,13 @@ class Settings(BaseSettings):
     LLM_LOG_PROMPTS: bool = False
     LLM_LOG_RESPONSES: bool = False
     LLM_CACHE_ENABLED: bool = True
+    LLM_COMPACT_PROMPTS: bool = True
+    LLM_MAX_PROMPT_CHARS: int = 5000
+    LLM_MAX_EVIDENCE_ITEMS: int = 3
+    LLM_MAX_CODEBASE_FILES: int = 5
+    LLM_MAX_ARTIFACT_PREVIEW_CHARS: int = 1500
+    LLM_AGENT_DELAY_MS: int = 1500
+    LLM_RATE_LIMIT_COOLDOWN_SECONDS: int = 8
     MAX_LLM_AGENTS_PER_WORKFLOW: int = 7
     LLM_AGENT_TIMEOUT_SECONDS: int = 30
     LLM_MAX_RETRIES: int = 1

@@ -25,6 +25,7 @@ class OpenAIStructuredClient:
         system_prompt: str,
         user_prompt: str,
         schema_model: Type[BaseModel],
+        max_tokens: int | None = None,
     ) -> OpenAIStructuredResult:
         if not settings.OPENAI_API_KEY:
             raise RuntimeError("missing_api_key")
@@ -54,7 +55,7 @@ class OpenAIStructuredClient:
                     "strict": False,
                 }
             },
-            max_output_tokens=settings.OPENAI_MAX_OUTPUT_TOKENS,
+            max_output_tokens=max_tokens or settings.OPENAI_MAX_OUTPUT_TOKENS,
             temperature=settings.OPENAI_TEMPERATURE,
         )
         latency_ms = int((perf_counter() - started) * 1000)

@@ -27,13 +27,14 @@ docker compose up --build
 ## Optional External Keys
 
 - `OPENAI_API_KEY`: optional OpenAI provider key. OpenAI API access may require active paid credits; insufficient quota falls back deterministically.
-- `GROQ_API_KEY`: optional Groq provider key. Set `LLM_PROVIDER=groq` to use `llama-3.3-70b-versatile`.
+- `GROQ_API_KEY`: optional Groq provider key. Set `LLM_PROVIDER=groq`. For the full seven-agent demo, use the per-agent `llama-3.1-8b-instant` defaults because `llama-3.3-70b-versatile` can hit free-tier quota quickly.
 - `GEMINI_API_KEY`: optional Gemini provider key. Set `LLM_PROVIDER=gemini` to use Gemini 2.0 Flash.
 - `XAI_API_KEY`: optional xAI Grok API key. Set `LLM_PROVIDER=xai` or `LLM_PROVIDER=grok` to use the OpenAI-compatible Grok API.
 - `GITHUB_TOKEN`: optional for GitHub repository ingestion. Blank still allows unauthenticated read-only search with lower rate limits. It does not enable real PR creation.
+- Hacker News ingestion does not require an API key; it uses the public Firebase API and official story metadata only.
 - `GITHUB_WEBHOOK_SECRET`: blank skips strict signature checks in development.
 - `OMIUM_API_KEY`: blank uses tracing stub.
-- `NEWS_API_KEY`: blank disables real news ingestion.
+- `NEWS_API_KEY`: legacy placeholder only; Hacker News ingestion does not use it or any other news API key.
 
 ## Safety Flags
 
@@ -48,6 +49,7 @@ docker compose up --build
 - `ALLOW_LLM_FILE_PATHS=false`
 - `ALLOW_LLM_VERIFICATION_OVERRIDE=false`
 - `GITHUB_INGESTION_ENABLED=true`
+- `HN_INGESTION_ENABLED=true`
 - `LIVE_EVENT_AUTO_TRIGGER=false`
 - `REPO_ANALYSIS_ENABLED=true`
 - `GITHUB_PR_DRAFT=true`
@@ -84,9 +86,17 @@ OPENAI_MAX_RETRIES=2
 OPENAI_TEMPERATURE=0.2
 GROQ_API_KEY=
 GROQ_MODEL=llama-3.3-70b-versatile
+GROQ_MODEL_DEFAULT=llama-3.1-8b-instant
+GROQ_MODEL_WATCHER=llama-3.1-8b-instant
+GROQ_MODEL_RESEARCH=llama-3.1-8b-instant
+GROQ_MODEL_STRATEGY=llama-3.1-8b-instant
+GROQ_MODEL_PLANNER=llama-3.1-8b-instant
+GROQ_MODEL_EXECUTION=llama-3.1-8b-instant
+GROQ_MODEL_VERIFICATION=llama-3.1-8b-instant
+GROQ_MODEL_PR=llama-3.1-8b-instant
 GROQ_API_BASE_URL=https://api.groq.com/openai/v1
 GROQ_TIMEOUT_SECONDS=30
-GROQ_MAX_OUTPUT_TOKENS=1800
+GROQ_MAX_OUTPUT_TOKENS=500
 GROQ_TEMPERATURE=0.2
 GEMINI_API_KEY=
 GEMINI_MODEL=gemini-2.0-flash
@@ -103,6 +113,13 @@ LLM_PROVIDER=groq
 LLM_LOG_PROMPTS=false
 LLM_LOG_RESPONSES=false
 LLM_CACHE_ENABLED=true
+LLM_COMPACT_PROMPTS=true
+LLM_MAX_PROMPT_CHARS=5000
+LLM_MAX_EVIDENCE_ITEMS=3
+LLM_MAX_CODEBASE_FILES=5
+LLM_MAX_ARTIFACT_PREVIEW_CHARS=1500
+LLM_AGENT_DELAY_MS=1500
+LLM_RATE_LIMIT_COOLDOWN_SECONDS=8
 MAX_LLM_AGENTS_PER_WORKFLOW=7
 LLM_AGENT_TIMEOUT_SECONDS=30
 LLM_MAX_RETRIES=1
@@ -117,6 +134,16 @@ GITHUB_SEARCH_MAX_RESULTS=10
 GITHUB_RATE_LIMIT_SAFETY_ENABLED=true
 GITHUB_REQUEST_TIMEOUT_SECONDS=20
 GITHUB_MAX_RETRIES=2
+HN_INGESTION_ENABLED=true
+HN_API_BASE_URL=https://hacker-news.firebaseio.com/v0
+HN_DEFAULT_FEED=top
+HN_MAX_STORIES=20
+HN_FETCH_DETAIL_CONCURRENCY=5
+HN_REQUEST_TIMEOUT_SECONDS=15
+HN_MAX_RETRIES=2
+HN_MIN_SCORE=20
+HN_MIN_IMPORTANCE_SCORE=0.45
+HN_KEYWORDS=ai,artificial intelligence,llm,agent,saas,startup,workflow,automation,productivity,developer tools,compliance,security,rag,copilot
 GITHUB_PR_DRAFT=true
 GITHUB_PR_BRANCH_PREFIX=evolvai/
 GITHUB_PR_COMMIT_AUTHOR_NAME=EvolvAI Bot
@@ -174,6 +201,40 @@ curl -X POST http://localhost:8000/api/v1/live-events/ingest/github \
   -H "Content-Type: application/json" \
   -d '{"query":"AI SaaS automation stars:>500","max_results":5,"trigger_workflows":false}'
 curl "http://localhost:8000/api/v1/market-events?source=github&event_type=github_repository_trend"
+```
+
+## Step 8 Hacker News Ingestion
+
+Hacker News ingestion is read-only and no-key. It calls the official Hacker News Firebase API, fetches story metadata from selected feeds, strips HTML from story text, filters by score and keywords, stores raw event metadata, dedupes by Hacker News item identity, and normalizes each new story into `market_events`.
+
+```env
+USE_LIVE_EXTERNAL_EVENTS=true
+HN_INGESTION_ENABLED=true
+HN_API_BASE_URL=https://hacker-news.firebaseio.com/v0
+HN_DEFAULT_FEED=top
+HN_MAX_STORIES=20
+HN_FETCH_DETAIL_CONCURRENCY=5
+HN_REQUEST_TIMEOUT_SECONDS=15
+HN_MAX_RETRIES=2
+HN_MIN_SCORE=20
+HN_MIN_IMPORTANCE_SCORE=0.45
+HN_KEYWORDS=ai,artificial intelligence,llm,agent,saas,startup,workflow,automation,productivity,developer tools,compliance,security,rag,copilot
+LIVE_EVENT_AUTO_TRIGGER=false
+ALLOW_REAL_GITHUB_PR=false
+ALLOW_CODE_EXECUTION=false
+ALLOW_EXTERNAL_WRITE_ACTIONS=false
+```
+
+Supported feeds are `top`, `new`, `best`, `show`, `ask`, and `jobs`. If Hacker News is unavailable, times out, returns malformed data, or the filters match no stories, EvolvAI records a safe ingestion result and the controlled demo remains available. EvolvAI does not scrape external story URLs, fetch comments deeply, trust story text as instructions, or require any paid news API.
+
+Smoke test:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/live-events/ingest/hacker-news \
+  -H "Content-Type: application/json" \
+  -d '{"feed":"top","max_results":10,"keywords":["ai","saas","agent","automation"],"min_score":20,"trigger_workflows":false}'
+curl "http://localhost:8000/api/v1/market-events?source=hacker_news"
+curl -X POST http://localhost:8000/api/v1/market-events/{event_id}/trigger-workflow
 ```
 
 ## Step 5 Read-only Repository Analysis

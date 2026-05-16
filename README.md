@@ -1,6 +1,6 @@
 # EvolvAI
 
-EvolvAI is an autonomous multi-agent SaaS evolution demo. Step 1 created the monorepo foundation. Step 2 added the deterministic controlled demo workflow. Step 3 added hybrid intelligence: all seven agents can use the active LLM provider with deterministic fallback. Step 4 adds real external event ingestion from GitHub repository/search signals. Step 5 adds read-only repository intelligence. Step 6 adds optional real GitHub draft PR creation behind explicit safety flags.
+EvolvAI is an autonomous multi-agent SaaS evolution demo. Step 1 created the monorepo foundation. Step 2 added the deterministic controlled demo workflow. Step 3 added hybrid intelligence: all seven agents can use the active LLM provider with deterministic fallback. Step 4 adds real external event ingestion from GitHub repository/search signals. Step 5 adds read-only repository intelligence. Step 6 adds optional real GitHub draft PR creation behind explicit safety flags. Step 8 adds Hacker News as a no-key news/trend source.
 
 ## Final Demo Path
 
@@ -16,10 +16,11 @@ This path uses controlled data and deterministic fallback, so it remains demoabl
 
 The secondary path is **Run Live Signal Demo**:
 
-1. Enter a GitHub query such as `AI SaaS automation stars:>500`.
-2. Click `Ingest GitHub Signals`.
-3. Pick a GitHub event and click `Run Workflow`.
-4. EvolvAI runs the same seven-agent workflow on the real external signal.
+1. Choose `GitHub Repositories` or `Hacker News`.
+2. Enter a GitHub query such as `AI SaaS automation stars:>500`, or Hacker News keywords such as `ai, saas, agent, automation`.
+3. Click `Ingest GitHub Signals` or `Ingest Hacker News Stories`.
+4. Pick a live event and click `Run Workflow`.
+5. EvolvAI runs the same seven-agent workflow on the real external signal.
 
 Safety defaults stay visible in the UI: real PR creation, code execution, and external write actions are disabled unless explicitly opted in.
 
@@ -40,6 +41,7 @@ flowchart LR
   Verification -. advisory explanation only .-> LLM
   PRPreview -. optional preview wording .-> LLM
   GitHub[GitHub Search API] -. optional .-> API
+  HN[Hacker News API] -. optional no-key .-> API
   Repo[GitHub Repository Tree] -. read-only .-> API
   API -. optional gated draft PR .-> GitHubPR[GitHub Pull Requests]
   Execution --> SafeDir[apps/backend/generated_runs/{workflow_id}]
@@ -76,6 +78,14 @@ flowchart LR
 - `GET /market-events?source=github&event_type=github_repository_trend` filters live events.
 - `POST /market-events/{event_id}/trigger-workflow` queues the existing seven-agent pipeline from a real ingested event.
 - Dashboard and Market Events UI controls for ingesting GitHub signals and triggering workflows from live events.
+
+## What Step 8 Adds
+
+- Hacker News ingestion through the public Firebase API, with no API key required.
+- `POST /live-events/ingest/hacker-news` to fetch top/new/best/show/ask/jobs stories, filter by AI/SaaS/productivity keywords, and normalize stories into `market_events`.
+- Hacker News raw events stored in `external_event_raw` and deduped by item id/title/url content hash.
+- Dashboard and Market Events UI controls for Hacker News feeds, keywords, score filters, event cards, and workflow triggers.
+- Hacker News text is treated as untrusted market-signal data, not instructions; no article scraping, comment scraping, code execution, or external writes are added.
 
 ## What Step 5 Adds
 
@@ -148,8 +158,21 @@ USE_LIVE_AI_OUTPUTS=true
 LLM_PROVIDER=groq
 GROQ_API_KEY=your_key
 GROQ_MODEL=llama-3.3-70b-versatile
+GROQ_MODEL_DEFAULT=llama-3.1-8b-instant
+GROQ_MODEL_WATCHER=llama-3.1-8b-instant
+GROQ_MODEL_RESEARCH=llama-3.1-8b-instant
+GROQ_MODEL_STRATEGY=llama-3.1-8b-instant
+GROQ_MODEL_PLANNER=llama-3.1-8b-instant
+GROQ_MODEL_EXECUTION=llama-3.1-8b-instant
+GROQ_MODEL_VERIFICATION=llama-3.1-8b-instant
+GROQ_MODEL_PR=llama-3.1-8b-instant
+GROQ_MAX_OUTPUT_TOKENS=500
+LLM_COMPACT_PROMPTS=true
+LLM_AGENT_DELAY_MS=1500
 LLM_FALLBACK_TO_DEMO=true
 ```
+
+`GROQ_MODEL` is kept as the fallback model. The per-agent model settings use `llama-3.1-8b-instant` by default to reduce token pressure during the seven-agent demo; if Groq returns quota or rate-limit errors, only that agent falls back and the workflow still completes.
 
 Live GitHub event mode:
 
@@ -160,6 +183,19 @@ GITHUB_TOKEN=
 ```
 
 `GITHUB_TOKEN` is optional. Without it, EvolvAI uses unauthenticated GitHub requests with lower rate limits. If Groq, OpenAI, Gemini, xAI, or GitHub is unavailable, EvolvAI falls back safely and keeps the controlled demo usable.
+
+Live Hacker News event mode:
+
+```env
+USE_LIVE_EXTERNAL_EVENTS=true
+HN_INGESTION_ENABLED=true
+HN_DEFAULT_FEED=top
+HN_MAX_STORIES=20
+HN_MIN_SCORE=20
+HN_KEYWORDS=ai,artificial intelligence,llm,agent,saas,startup,workflow,automation,productivity,developer tools,compliance,security,rag,copilot
+```
+
+Hacker News requires no API key and does not scrape article bodies or comments. EvolvAI fetches official story metadata only, normalizes relevant stories into `market_events`, and lets a user manually trigger the existing workflow.
 
 Read-only repository analysis:
 
@@ -232,6 +268,23 @@ curl -X POST http://localhost:8000/api/v1/market-events/{event_id}/trigger-workf
 curl "http://localhost:8000/api/v1/market-events?source=github&event_type=github_repository_trend"
 ```
 
+Step 8 Hacker News ingestion commands:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/live-events/ingest/hacker-news \
+  -H "Content-Type: application/json" \
+  -d '{
+    "feed": "top",
+    "max_results": 10,
+    "keywords": ["ai", "saas", "agent", "automation"],
+    "min_score": 20,
+    "trigger_workflows": false
+  }'
+
+curl "http://localhost:8000/api/v1/market-events?source=hacker_news"
+curl -X POST http://localhost:8000/api/v1/market-events/{event_id}/trigger-workflow
+```
+
 Step 5 repository analysis commands:
 
 ```bash
@@ -282,6 +335,7 @@ Real vs controlled:
 - Real: FastAPI, PostgreSQL persistence, Redis/Celery async execution, Socket.IO realtime, Alembic migrations, Next.js dashboard.
 - Controlled: market data, research evidence, agent outputs, generated artifacts, verification, and PR preview have deterministic fixtures/templates.
 - Optional: the active LLM provider can enhance all seven agents with strict schema validation and fallback; GitHub can ingest public repository signals.
+- Optional: Hacker News can ingest public no-key story metadata as technology/news signals.
 - Optional: read-only repository analysis can add stack and relevant-file context to workflow planning.
 - Optional but disabled by default: real GitHub draft PR creation after verification passes.
 - Disabled by default: real GitHub PR creation, code execution, shell command execution, external write actions, auto-merge, and automatic live-event workflow triggering.
@@ -326,8 +380,9 @@ npm run dev -- --hostname 0.0.0.0
 - Missing API keys: expected; deterministic fallbacks are used.
 - GitHub rate limit: add `GITHUB_TOKEN` or rerun later; controlled demo remains available.
 - LLM fallback badge: the active provider is disabled, rate-limited, invalid, or returned unusable JSON, so deterministic safe output was used.
-- Live events empty: click `Ingest GitHub Signals` on `/dashboard` or `/market-events`, or enable `USE_LIVE_EXTERNAL_EVENTS=true`.
-- Live source disabled: update `apps/backend/.env` with `USE_LIVE_EXTERNAL_EVENTS=true` and `GITHUB_INGESTION_ENABLED=true`, then restart Docker.
+- Live events empty: click `Ingest GitHub Signals` or `Ingest Hacker News Stories` on `/dashboard` or `/market-events`, or enable `USE_LIVE_EXTERNAL_EVENTS=true`.
+- Live source disabled: update `apps/backend/.env` with `USE_LIVE_EXTERNAL_EVENTS=true`, `GITHUB_INGESTION_ENABLED=true`, or `HN_INGESTION_ENABLED=true`, then restart Docker.
+- Hacker News returns no events: lower `min_score`, clear the keyword filter, or try `best`, `new`, or `show` feeds. It requires no API key.
 - Repository analysis failed: verify owner/repo/branch, add `GITHUB_TOKEN` for private or rate-limited repos, and keep `REPO_ANALYSIS_INCLUDE_CONTENT=false` for the safest demo path.
 - Draft PR button blocked: inspect `/api/v1/workflows/{workflow_id}/pr-safety-check`; default flags intentionally block external writes.
 

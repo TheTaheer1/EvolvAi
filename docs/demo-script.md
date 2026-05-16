@@ -5,7 +5,7 @@
 1. Open `http://localhost:3000/dashboard`.
 2. Say: "This is EvolvAI, an autonomous SaaS evolution platform."
 3. Point to the safety badges: real PR creation, code execution, and external write actions are disabled by default.
-4. Say: "We can run a reliable controlled demo or ingest real GitHub signals."
+4. Say: "We can run a reliable controlled demo, ingest real GitHub repository signals, or ingest no-key Hacker News technology stories."
 5. Click `Run Reliable Demo`.
 6. Open the active workflow detail page.
 7. Explain the seven-agent story:
@@ -17,10 +17,10 @@
    - Verification checks paths, secrets, dangerous commands, and PR readiness.
    - PR Agent prepares a preview-only pull request.
 8. Show explainability, impact analysis, generated artifacts, verification passed, and PR preview.
-9. Optional: return to the dashboard, ingest GitHub signals, and trigger the same workflow from a real GitHub event.
+9. Optional: return to the dashboard, ingest GitHub or Hacker News signals, and trigger the same workflow from a real live event.
 10. Close with: "Everything is autonomous, but safety-gated. Real PR creation and code execution are disabled by default, and deterministic fallback keeps the demo reliable."
 
-If live LLM or GitHub calls rate-limit, point to `Fallback Used`: that means EvolvAI safely used deterministic output and the workflow continued.
+If live LLM, GitHub, or Hacker News calls fail or rate-limit, point to `Fallback Used` or the ingestion warning: EvolvAI safely keeps the reliable demo path available.
 
 ## Path A: Controlled Demo
 
@@ -62,6 +62,16 @@ If live LLM or GitHub calls rate-limit, point to `Fallback Used`: that means Evo
 5. Click `Trigger Workflow` on one live event.
 6. Open the workflow detail page and show the same seven-agent pipeline, explainability, impact, artifacts, verification, and PR preview.
 
+## Path C2: Hacker News News Signal Ingestion
+
+1. Open `/dashboard` or `/market-events`.
+2. In Live Signal Demo, select `Hacker News`.
+3. Choose `top` or `best`, use keywords such as `ai, saas, agent, automation`, and keep `min_score=20`.
+4. Click `Ingest Hacker News Stories`.
+5. Show HN event cards with source badge, score, comments, author, importance score, and story URL. Mention that Hacker News requires no API key and EvolvAI uses the official API, not scraping.
+6. Click `Run Workflow` on one Hacker News event.
+7. Open the workflow detail page and explain that the same seven-agent pipeline analyzes the news signal as market data, then creates safe artifacts, verification, and PR preview.
+
 ## Path D: Read-only Repository Intelligence
 
 1. Open `/repositories`.
@@ -91,10 +101,10 @@ Judge recommendation: run Path A first because it is deterministic. Then show Pa
 - LangGraph-compatible seven-agent orchestration.
 - Deterministic demo data for reliability.
 - Optional LLM reasoning with deterministic fallback.
-- Optional GitHub ingestion normalized into the same MarketEvent pipeline.
+- Optional GitHub and Hacker News ingestion normalized into the same MarketEvent pipeline.
 - Optional read-only repository intelligence improves planning without touching the source repo.
 - Optional draft PR creation exists, but is explicitly gated and disabled by default.
-- Missing GitHub token or rate limits do not break the product; ingestion reports the failure and the controlled demo remains ready.
+- Missing GitHub token, HN outage, or rate limits do not break the product; ingestion reports the failure and the controlled demo remains ready.
 - Safe autonomous execution: generated files stay inside `apps/backend/generated_runs/{workflow_id}/`.
 - Real GitHub PR creation is disabled unless `ALLOW_REAL_GITHUB_PR=true`.
 
@@ -112,6 +122,12 @@ curl -X POST http://localhost:8000/api/v1/live-events/ingest/github \
   -d '{"query":"AI SaaS automation stars:>500","max_results":5,"trigger_workflows":false}'
 
 curl "http://localhost:8000/api/v1/market-events?source=github&event_type=github_repository_trend"
+
+curl -X POST http://localhost:8000/api/v1/live-events/ingest/hacker-news \
+  -H "Content-Type: application/json" \
+  -d '{"feed":"top","max_results":10,"keywords":["ai","saas","agent","automation"],"min_score":20,"trigger_workflows":false}'
+
+curl "http://localhost:8000/api/v1/market-events?source=hacker_news"
 
 curl -X POST http://localhost:8000/api/v1/market-events/{event_id}/trigger-workflow
 

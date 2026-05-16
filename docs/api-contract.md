@@ -45,6 +45,7 @@ Trigger request:
 
 - `GET /market-events`
 - `GET /market-events?source=github&event_type=github_repository_trend`
+- `GET /market-events?source=hacker_news`
 - `POST /market-events`
 - `GET /market-events/{event_id}`
 - `POST /market-events/{event_id}/trigger-workflow`
@@ -121,8 +122,11 @@ LLM endpoints expose only safe metadata: provider, model, agent name, status, la
 
 - `GET /live-events/sources`
 - `POST /live-events/ingest/github`
+- `POST /live-events/ingest/hacker-news`
 - `GET /live-events/ingestion-runs`
+- `GET /live-events/ingestion-runs?source=hacker_news`
 - `GET /live-events/raw`
+- `GET /live-events/raw?source=hacker_news`
 - `POST /market-events/{event_id}/trigger-workflow`
 
 GitHub ingest request:
@@ -152,6 +156,35 @@ GitHub ingest response:
 ```
 
 `events_skipped` counts duplicate raw events based on `source + content_hash`. Triggering a workflow from a live event creates a `live_market_event` workflow with `demo_mode=false`, `live_event=true`, safe generated workspace metadata, and real PR creation disabled.
+
+Hacker News ingest request:
+
+```json
+{
+  "feed": "top",
+  "max_results": 20,
+  "keywords": ["ai", "saas", "agent"],
+  "min_score": 20,
+  "trigger_workflows": false
+}
+```
+
+Hacker News ingest response:
+
+```json
+{
+  "run_id": "uuid",
+  "source": "hacker_news",
+  "status": "completed",
+  "events_found": 20,
+  "events_created": 5,
+  "events_skipped": 15,
+  "market_events": [],
+  "warnings": []
+}
+```
+
+Supported Hacker News feeds are `top`, `new`, `best`, `show`, `ask`, and `jobs`. Hacker News requires no API key. EvolvAI fetches official story metadata only, does not scrape article bodies or comments, strips story HTML before display, dedupes by Hacker News item identity, and treats story text as untrusted market-signal data.
 
 ## Step 5 Repositories
 
