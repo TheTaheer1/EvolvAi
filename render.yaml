@@ -25,7 +25,7 @@ services:
     dockerfilePath: apps/backend/Dockerfile
     # Render manages the build via Docker, but we need to override the start command
     # to run Alembic migrations before starting Uvicorn, just like docker-compose.
-    startCommand: sh -c "alembic upgrade head && uvicorn app.socket_app:app --host 0.0.0.0 --port $PORT"
+    dockerCommand: sh -c "alembic upgrade head && uvicorn app.socket_app:app --host 0.0.0.0 --port $PORT"
     envVars:
       - key: DATABASE_URL
         fromDatabase:
@@ -78,7 +78,7 @@ services:
     env: docker
     dockerContext: apps/backend
     dockerfilePath: apps/backend/Dockerfile
-    startCommand: celery -A app.tasks.celery_app.celery_app worker -Q workflows,webhooks,scheduled,pr --loglevel=info
+    dockerCommand: celery -A app.tasks.celery_app.celery_app worker -Q workflows,webhooks,scheduled,pr --loglevel=info
     envVars:
       - key: DATABASE_URL
         fromDatabase:
@@ -118,6 +118,7 @@ services:
   - type: redis
     name: evolvai-redis
     plan: free
+    ipAllowList: []
 
 databases:
   # -------------------------
