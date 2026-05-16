@@ -4,8 +4,8 @@ services:
   # -------------------------
   - type: pserv
     name: evolvai-chroma
-    env: docker
-    image: chromadb/chroma:latest
+    env: image
+    imagePath: chromadb/chroma:latest
     disk:
       name: chromadata
       mountPath: /chroma/chroma
