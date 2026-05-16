@@ -1,0 +1,11 @@
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
+.ruff_cache
+generated_runs
+.env
+.env.*
+.DS_Store
+requirements.broken.txt

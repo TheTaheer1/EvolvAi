@@ -1,0 +1,128 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: evolvai-postgres
+    environment:
+      POSTGRES_USER: evolvai
+      POSTGRES_PASSWORD: evolvai
+      POSTGRES_DB: evolvai_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - evolvai_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evolvai -d evolvai_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - evolvai_net
+
+  redis:
+    image: redis:7-alpine
+    container_name: evolvai-redis
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - evolvai_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - evolvai_net
+
+  chroma:
+    image: chromadb/chroma:latest
+    container_name: evolvai-chroma
+    ports:
+      - "8001:8000"
+    volumes:
+      - evolvai_chroma_data:/chroma/chroma
+    networks:
+      - evolvai_net
+
+  backend:
+    build:
+      context: ./apps/backend
+      dockerfile: Dockerfile
+    container_name: evolvai-backend
+    env_file:
+      - ./apps/backend/.env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://evolvai:evolvai@postgres:5432/evolvai_db
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      CHROMA_HOST: chroma
+      CHROMA_PORT: 8000
+    command: sh -c "alembic upgrade head && uvicorn app.socket_app:app --host 0.0.0.0 --port 8000 --reload --reload-exclude 'generated_runs/*'"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./apps/backend/generated_runs:/app/generated_runs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      chroma:
+        condition: service_started
+    networks:
+      - evolvai_net
+
+  worker:
+    build:
+      context: ./apps/backend
+      dockerfile: Dockerfile
+    container_name: evolvai-worker
+    env_file:
+      - ./apps/backend/.env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://evolvai:evolvai@postgres:5432/evolvai_db
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      CHROMA_HOST: chroma
+      CHROMA_PORT: 8000
+    command: celery -A app.tasks.celery_app.celery_app worker -Q workflows,webhooks,scheduled,pr --loglevel=info
+    volumes:
+      - ./apps/backend/generated_runs:/app/generated_runs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      chroma:
+        condition: service_started
+    networks:
+      - evolvai_net
+
+  frontend:
+    build:
+      context: ./apps/frontend
+      dockerfile: Dockerfile
+    container_name: evolvai-frontend
+    env_file:
+      - ./apps/frontend/.env.example
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
+      NEXT_PUBLIC_SOCKET_URL: http://localhost:8000
+    command: npm run dev -- --hostname 0.0.0.0
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - evolvai_net
+
+networks:
+  evolvai_net:
+    driver: bridge
+
+volumes:
+  evolvai_postgres_data:
+  evolvai_redis_data:
+  evolvai_chroma_data:

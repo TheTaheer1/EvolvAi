@@ -1,0 +1,1 @@
+"""Market signal adapter skeletons."""
