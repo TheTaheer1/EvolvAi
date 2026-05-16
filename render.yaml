@@ -1,0 +1,128 @@
+services:
+  # -------------------------
+  # Private Service: ChromaDB
+  # -------------------------
+  - type: pserv
+    name: evolvai-chroma
+    env: docker
+    image: chromadb/chroma:latest
+    disk:
+      name: chromadata
+      mountPath: /chroma/chroma
+      sizeGB: 1
+    envVars:
+      - key: IS_PERSISTENT
+        value: "TRUE"
+
+  # -------------------------
+  # Web Service: FastAPI Backend
+  # -------------------------
+  - type: web
+    name: evolvai-backend
+    env: docker
+    dockerContext: apps/backend
+    dockerfilePath: apps/backend/Dockerfile
+    # Render manages the build via Docker, but we need to override the start command
+    # to run Alembic migrations before starting Uvicorn, just like docker-compose.
+    startCommand: sh -c "alembic upgrade head && uvicorn app.socket_app:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: evolvai-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: evolvai-redis
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: evolvai-redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: redis
+          name: evolvai-redis
+          property: connectionString
+      - key: CHROMA_HOST
+        value: evolvai-chroma
+      - key: CHROMA_PORT
+        value: "8000"
+      - key: ALLOW_REAL_GITHUB_PR
+        value: "false"
+      - key: ALLOW_CODE_EXECUTION
+        value: "false"
+      - key: ALLOW_EXTERNAL_WRITE_ACTIONS
+        value: "false"
+      - key: USE_LIVE_AI_OUTPUTS
+        value: "true"
+      - key: USE_LIVE_EXTERNAL_EVENTS
+        value: "true"
+      # These keys will need to be populated in the Render Dashboard securely
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+    disk:
+      name: generated-runs
+      mountPath: /app/generated_runs
+      sizeGB: 1
+
+  # -------------------------
+  # Background Worker: Celery
+  # -------------------------
+  - type: worker
+    name: evolvai-worker
+    env: docker
+    dockerContext: apps/backend
+    dockerfilePath: apps/backend/Dockerfile
+    startCommand: celery -A app.tasks.celery_app.celery_app worker -Q workflows,webhooks,scheduled,pr --loglevel=info
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: evolvai-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: evolvai-redis
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: evolvai-redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: redis
+          name: evolvai-redis
+          property: connectionString
+      - key: CHROMA_HOST
+        value: evolvai-chroma
+      - key: CHROMA_PORT
+        value: "8000"
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+    disk:
+      name: generated-runs-worker
+      mountPath: /app/generated_runs
+      sizeGB: 1
+
+  # -------------------------
+  # Redis Service
+  # -------------------------
+  - type: redis
+    name: evolvai-redis
+    plan: free
+
+databases:
+  # -------------------------
+  # PostgreSQL Database
+  # -------------------------
+  - name: evolvai-postgres
+    databaseName: evolvai_db
+    user: evolvai
+    plan: free
